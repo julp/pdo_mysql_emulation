@@ -3,6 +3,11 @@
  * CREDITS: based on initial work of stealth35 (https://github.com/stealth35/mysql_prepare)
  **/
 
+/**
+ * TODO:
+ * - CRITICAL: "save" setFetchMode parameters for the next fetches
+ **/
+
 if (!extension_loaded('pdo')) {
     class_alias('EPDO', 'PDO');
     class_alias('EPDOException', 'PDOException');
@@ -21,7 +26,7 @@ class EPDO {
     const FETCH_INTO       = 7;
     const FETCH_KEY_PAIR   = 8;
     const FETCH_FUNC       = 9;
-    const FETCH_LAZY       = 10; // compatibility only
+    const FETCH_LAZY       = 10;
     const FETCH_BOUND      = 11;
     const FETCH_COLUMN     = 12;
 
@@ -29,8 +34,8 @@ class EPDO {
     const FETCH_GROUP      = 0x00010000;
     const FETCH_UNIQUE     = 0x00030000;
     const FETCH_CLASSTYPE  = 0x00040000;
-    const FETCH_SERIALIZE  = 0x00080000; // compatibility only
-    const FETCH_PROPS_LATE = 0x00100000; // compatibility only
+    const FETCH_SERIALIZE  = 0x00080000;
+    const FETCH_PROPS_LATE = 0x00100000;
 
     const PARAM_NULL         = __LINE__;
     const PARAM_BOOL         = __LINE__;
@@ -273,12 +278,10 @@ class EPDOStatement implements Iterator {
     }
 
     public function getAttribute($attribute) {
-        // TODO ?
         return call_user_func_array(array($this->dbh, __FUNCTION__), func_get_args());
     }
 
     public function setAttribute($attribute, $value) {
-        // TODO ?
         return call_user_func_array(array($this->dbh, __FUNCTION__), func_get_args());
     }
 
