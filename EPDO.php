@@ -476,7 +476,7 @@ class EPDOStatement implements Iterator {
                 // TODO: casts according to (E)PDO::PARAM_*
                 if (FALSE !== $row = mysql_fetch_row($this->result)) {
                     for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
-                        if (array_key_exists($c, $this->out)) {
+                        if (array_key_exists($c + 1, $this->out)) {
                             $this->out[$c + 1] = $row[$c];
                         } else {
                             $fieldname = mysql_field_name($this->result, $c);
