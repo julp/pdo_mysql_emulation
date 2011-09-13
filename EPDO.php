@@ -525,7 +525,7 @@ class EPDOStatement implements Iterator {
 
     public function closeCursor() {
         if ($this->statement_id) {
-            mysql_query('DEALLOCATE PREPARE ' . $this->statement_id, $this->dbh->getLink());
+            mysql_query('DEALLOCATE PREPARE `' . $this->statement_id . '`', $this->dbh->getLink());
             $this->in = $this->intypes = $this->out = $this->outtypes = array();
             $this->placeholders = $this->statement_id = $this->result = NULL;
             $this->current = FALSE;
