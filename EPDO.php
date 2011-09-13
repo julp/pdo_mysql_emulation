@@ -133,6 +133,10 @@ class EPDO {
         }
     }
 
+    public function lastInsertId() {
+        return mysql_insert_id($this->link);
+    }
+
     public function exec($statement) {
         $ret = mysql_query($statement);
         $this->checkError($ret);
@@ -285,8 +289,8 @@ class EPDOStatement implements Iterator {
         return call_user_func_array(array($this->dbh, __FUNCTION__), func_get_args());
     }
 
-    public function getColumnMeta() {
-        // TODO
+    public function getColumnMeta($colno) {
+        return (array) mysql_fetch_field($this->result, $colno);
     }
 
     public function nextRowset() {
