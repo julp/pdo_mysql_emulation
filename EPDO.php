@@ -347,7 +347,9 @@ class EPDOStatement implements Iterator {
             }
             $ext = $this->_setVars($safe_parameters);
         } else if (!empty($this->in)) {
-            // TODO: apply types (PDO::PARAM_*) for bindParam
+            foreach ($this->intypes as $k => $t) {
+                $this->_applyType($this->in[$k], $t);
+            }
             $ext = $this->_setVars($this->in);
         } else {
             $ext = sprintf('EXECUTE `%s`', $this->statement_id);
@@ -473,15 +475,16 @@ class EPDOStatement implements Iterator {
                 // ???
                 return FALSE;
             case EPDO::FETCH_BOUND:
-                // TODO: casts according to (E)PDO::PARAM_*
                 if (FALSE !== $row = mysql_fetch_row($this->result)) {
                     for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
                         if (array_key_exists($c + 1, $this->out)) {
                             $this->out[$c + 1] = $row[$c];
+                            $this->_applyType($this->out[$c + 1], $this->outtypes[$c + 1]);
                         } else {
                             $fieldname = mysql_field_name($this->result, $c);
                             if (array_key_exists($fieldname, $this->out)) {
                                 $this->out[$fieldname] = $row[$c];
+                                $this->_applyType($this->out[$fieldname], $this->outtypes[$fieldname]);
                             }
                         }
                     }
