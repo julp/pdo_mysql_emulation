@@ -313,7 +313,7 @@ class EPDOStatement implements Iterator {
         foreach ($parameters as $id => $parameter) {
             $key = sprintf('@`%s`', $id);
 
-            if(is_numeric($parameter)) {
+            if (is_numeric($parameter)) {
                 $sf = '@`%s` = %s';
             } else {
                 $sf = '@`%s` = \'%s\'';
