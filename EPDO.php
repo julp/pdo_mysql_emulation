@@ -3,17 +3,6 @@
  * CREDITS: based on initial work of stealth35 (https://github.com/stealth35/mysql_prepare)
  **/
 
-/**
- * TODO:
- * - CRITICAL: "save" setFetchMode parameters for the next fetches
- **/
-
-if (!extension_loaded('pdo')) {
-    class_alias('EPDO', 'PDO');
-    class_alias('EPDOException', 'PDOException');
-    class_alias('EPDOStatement', 'PDOStatement');
-}
-
 class EPDOException extends Exception {}
 
 class EPDO {
@@ -41,9 +30,9 @@ class EPDO {
     const PARAM_BOOL         = __LINE__;
     const PARAM_INT          = __LINE__;
     const PARAM_STR          = __LINE__;
-    const PARAM_LOB          = __LINE__; // compatibility only
-    const PARAM_STMT         = __LINE__; // compatibility only
-    const PARAM_INPUT_OUTPUT = __LINE__; // compatibility only
+    const PARAM_LOB          = __LINE__;
+    const PARAM_STMT         = __LINE__;
+    const PARAM_INPUT_OUTPUT = __LINE__;
 
     const ATTR_ERRMODE            = __LINE__;
     const ATTR_STATEMENT_CLASS    = __LINE__;
@@ -206,7 +195,7 @@ class EPDOStatement implements Iterator {
     private $intypes = array();  // bindParam
     private $out = array();      // bindColumn
     private $outtypes = array(); // bindColumn
-    private $fetch_mode = 0;
+    private $fetch_args = array();
 
     public $queryString = '';
 
@@ -332,6 +321,7 @@ class EPDOStatement implements Iterator {
     public function execute($input_parameters = NULL) {
         if (is_array($input_parameters) && !empty($input_parameters)) {
             $safe_parameters = array();
+            // TODO: assume first numeric key is 0 and add 1 to all numeric keys
             foreach ($input_parameters as $k => $v) {
                 if (is_int($k)) {
                     continue;
@@ -360,10 +350,6 @@ class EPDOStatement implements Iterator {
         $this->dbh->checkError($this->result = mysql_query($ext, $this->dbh->getLink()));
 
         return (bool) $this->result;
-    }
-
-    public function setFetchMode($mode, $class_name = NULL) {
-        $this->fetch_mode = $mode;
     }
 
     private function _applyType(&$value, $type) {
@@ -401,7 +387,7 @@ class EPDOStatement implements Iterator {
     }
 
     public function bindColumn($column, &$variable, $type = EPDO::PARAM_STR) {
-        $this->fetch_mode = EPDO::FETCH_BOUND;
+        $this->fetch_args = array(EPDO::FETCH_BOUND);
         $this->outtypes[$column] = $type;
         $this->out[$column] = &$variable;
 
@@ -428,20 +414,30 @@ class EPDOStatement implements Iterator {
         return TRUE;
     }
 
-    private function _fetch($mode = 0 /* , ...*/) {
+    public function setFetchMode($mode /*, ...*/) {
+        // TODO: check arguments
+        $args = func_get_args();
+        $this->fetch_args = $args;
+    }
+
+    private function _fetch(Array $args) {
         if (!$this->result) {
             return FALSE;
         }
-        if (!$mode) {
-            if ($this->fetch_mode) {
-                $mode = $this->fetch_mode;
+        if (!$args) {
+            if ($this->fetch_args) {
+                $args = $this->fetch_args;
+                $mode = array_shift($args);
             } else {
                 $mode = $this->dbh->getAttribute(EPDO::ATTR_DEFAULT_FETCH_MODE);
             }
+        } else {
+            $mode = array_shift($args);
         }
+        $nbArgs = count($args);
         switch ($mode & ~EPDO::FETCH_FLAGS) {
             case EPDO::FETCH_COLUMN: /* $no = 0 */
-                $no = func_num_args() > 1 ? func_get_arg(1) : 0;
+                $no = $nbArgs > 0 ? $args[0] : 0;
                 // assume $no < mysql_num_fields($this->result) ?
                 if (FALSE !== $row = mysql_fetch_row($this->result)) {
                     return $row[$no];
@@ -457,20 +453,81 @@ class EPDOStatement implements Iterator {
                 return mysql_fetch_assoc($this->result);
             case EPDO::FETCH_NAMED:
                 // TODO: play with mysql_*field* ?
+                return FALSE;
             case EPDO::FETCH_FUNC: /* callback */
-                if (FALSE === $args = mysql_fetch_row($this->result)) {
+                // TODO: check valid callback
+                if (FALSE === ($cbArgs = mysql_fetch_row($this->result))) {
                     return FALSE;
                 } else {
-                    return call_user_func_array(func_get_arg(1), $args);
+                    return call_user_func_array($args[0], $cbArgs);
                 }
+            case EPDO::FETCH_CLASS: /* classname?, ctor_args? */
+                // default (pdo as mysql_fetch_object): array_merge($this->fetch(), object properties) then __construct
+                // late: __construct then array_merge($this->fetch(), object properties)
+                $late = ($mode & EPDO::FETCH_PROPS_LATE) || (($mode & EPDO::FETCH_CLASSTYPE) && !method_exists('ReflectionClass', 'newInstanceWithoutConstructor'));
+                if ($mode & EPDO::FETCH_CLASSTYPE) {
+                    if (FALSE === ($row = mysql_fetch_assoc($this->result))) {
+                        return FALSE;
+                    }
+                    $class_name = array_shift($row);
+                    if (!$class_name || !class_exists($class_name)) { // call autoload
+                        // error
+                    }
+                } else if ($nbArgs >= 1) {
+                    $class_name = $args[0];
+                    $ctor_args = $nbArgs == 2 ? $args[1] : array();
+                } else {
+                    $class_name = '';
+                }
+                if ($late) {
+                    if (FALSE === ($row = mysql_fetch_assoc($this->result))) {
+                        return FALSE;
+                    }
+                }
+                if ($class_name) {
+                    if ($late || ($mode & EPDO::FETCH_CLASSTYPE)) {
+                        $rc = new ReflectionClass($class_name);
+                        if (!$rc->isInstantiable()) {
+                            // error
+                        }
+                        if (NULL !== ($ctor = $rc->getConstructor())) {
+                            if ($ctor->getNumberOfRequiredParameters() < count($ctor_args)) {
+                                // error
+                            }
+                        }
+                        if (!$late) {
+                            $obj = $rc->newInstanceWithoutConstructor();
+                        } else {
+                            if ($ctor_args) {
+                                $obj = $rc->newInstanceArgs($ctor_args);
+                            } else {
+                                $obj = $rc->newInstance();
+                            }
+                        }
+                        foreach ($row as $k => $v) {
+                            if ($rc->hasProperty($k) && ($p = $rc->getProperty($k)) && ($p->isPrivate() || $p->isProtected())) {
+                                $p->setAccessible(TRUE);
+                                $p->setValue($obj, $v);
+                                $p->setAccessible(FALSE);
+                            } else {
+                                $obj->$k = $v;
+                            }
+                        }
+                        if (!$late) {
+                            if ($ctor_args) {
+                                $ctor->invokeArgs($obj, $ctor_args);
+                            } else {
+                                $ctor->invoke($obj);
+                            }
+                        }
+                        return $obj;
+                    } else if (class_exists($class_name)) { // call autoload
+                        return mysql_fetch_object($this->result, $class_name, $ctor_args);
+                    }
+                }
+                // no break here !
             case EPDO::FETCH_OBJ:
                 return mysql_fetch_object($this->result);
-            case EPDO::FETCH_CLASS: /* classname?, ctor_args? */
-                if ($mode & EPDO::FETCH_CLASSTYPE) {
-                    // ???
-                } else {
-                    return mysql_fetch_object($this->result/* ... */);
-                }
             case EPDO::FETCH_INTO:
                 // ???
                 return FALSE;
@@ -503,47 +560,54 @@ class EPDOStatement implements Iterator {
     }
 
     public function fetchColumn($no = 0) {
-        return $this->_fetch(EPDO::FETCH_COLUMN, $no);
+        return $this->_fetch(array(EPDO::FETCH_COLUMN, $no));
     }
 
-    public function fetch($mode = 0) {
-        return $this->_fetch($mode);
+    public function fetch(/*$mode, ... */) {
+        return $this->_fetch(func_get_args());
     }
 
     public function fetchObject($class_name = '', $ctor_args = array()) {
-        if ($class_name && class_exists($class_name)) {
-            return $this->_fetch(EPDO::FETCH_CLASS, $class_name, $ctor_args);
-        } else {
-            return $this->_fetch(EPDO::FETCH_OBJ);
-        }
+        return $this->_fetch(array(EPDO::FETCH_CLASS, $class_name, $ctor_args));
     }
 
-    public function fetchAll($mode = 0) {
+    // incomplete (UNIQUE, GROUP, KEY_PAIR // BOUND, INTO)
+    public function fetchAll(/*$mode, ... */) {
         $rows = array();
-        if (!$mode) {
-            if ($this->fetch_mode) {
-                $mode = $this->fetch_mode;
+        if (!func_num_args()) {
+            if ($this->fetch_args) {
+                $args = $this->fetch_args;
+                $mode = array_shift($args);
             } else {
+                $args = array();
                 $mode = $this->dbh->getAttribute(EPDO::ATTR_DEFAULT_FETCH_MODE);
             }
+        } else {
+            $args = func_get_args();
+            $mode = array_shift($args);
         }
-        /*while ($row = $this->_fetch()) {
+        while ($row = $this->_fetch($args)) {
             $rows[] = $row;
-        }*/
+        }
         return $rows;
     }
 
     public function closeCursor() {
         if ($this->statement_id) {
             mysql_query('DEALLOCATE PREPARE `' . $this->statement_id . '`', $this->dbh->getLink());
-            $this->in = $this->intypes = $this->out = $this->outtypes = array();
+            $this->fetch_args = $this->in = $this->intypes = $this->out = $this->outtypes = array();
             $this->placeholders = $this->statement_id = $this->result = NULL;
             $this->current = FALSE;
-            $this->fetch_mode = 0;
         }
     }
 
     public function __destruct() {
         $this->closeCursor();
     }
+}
+
+if (!extension_loaded('pdo')) {
+    class_alias('EPDO', 'PDO');
+    class_alias('EPDOException', 'PDOException');
+    class_alias('EPDOStatement', 'PDOStatement');
 }
