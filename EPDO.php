@@ -35,6 +35,10 @@ class EPDO {
     const PARAM_INPUT_OUTPUT = __LINE__;
 
     const ATTR_ERRMODE            = __LINE__;
+    const ATTR_CLIENT_VERSION     = __LINE__;
+    const ATTR_SERVER_VERSION     = __LINE__;
+    const ATTR_CONNECTION_STATUS  = __LINE__;
+    const ATTR_AUTOCOMMIT         = __LINE__;
     const ATTR_STATEMENT_CLASS    = __LINE__;
     const ATTR_DEFAULT_FETCH_MODE = __LINE__;
     const ATTR_DRIVER_NAME        = __LINE__;
@@ -54,7 +58,6 @@ class EPDO {
     private $attributes = array(
         self::ATTR_ERRMODE            => self::ERRMODE_SILENT,
         self::ATTR_DEFAULT_FETCH_MODE => self::FETCH_BOTH,
-        self::ATTR_DRIVER_NAME        => 'mysql',
     );
 
     public function checkError($retval = FALSE) {
@@ -115,11 +118,21 @@ class EPDO {
     }
 
     public function getAttribute($attribute) {
-        return isset($this->attributes[$attribute]) ? $this->attributes[$attribute] : NULL;
+        switch ($attribute) {
+            case self::ATTR_DRIVER_NAME:
+                return 'mysql';
+            case self::ATTR_CLIENT_VERSION:
+                return mysql_get_client_info();
+            case self::ATTR_SERVER_VERSION:
+                return mysql_get_server_info($this->link);
+            case self::ATTR_CONNECTION_STATUS:
+                return mysql_ping($this->link);
+            default:
+                return isset($this->attributes[$attribute]) ? $this->attributes[$attribute] : NULL;
+        }
     }
 
     public function setAttribute($attribute, $value) {
-        // TODO: ATTR_DRIVER_NAME read only
         if (!isset($this->attributes[$attribute])) {
             return FALSE;
         } else {
