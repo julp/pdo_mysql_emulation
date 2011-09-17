@@ -39,6 +39,12 @@ class EPDO {
     const ATTR_DEFAULT_FETCH_MODE = __LINE__;
     const ATTR_DRIVER_NAME        = __LINE__;
 
+    // array_change_key_case
+    const ATTR_CASE    = __LINE__;
+    const CASE_NATURAL = __LINE__;
+    const CASE_LOWER   = __LINE__;
+    const CASE_UPPER   = __LINE__;
+
     const ERRMODE_SILENT    = __LINE__;
     const ERRMODE_WARNING   = __LINE__;
     const ERRMODE_EXCEPTION = __LINE__;
@@ -454,11 +460,24 @@ class EPDOStatement implements Iterator {
             case EPDO::FETCH_NUM:
                 return mysql_fetch_row($this->result);
             case EPDO::FETCH_ASSOC:
-                // array_change_key_case
                 return mysql_fetch_assoc($this->result);
             case EPDO::FETCH_NAMED:
-                // TODO: play with mysql_*field* ?
-                return FALSE;
+                if (FALSE === ($tmp = mysql_fetch_row($this->result))) {
+                    return FALSE;
+                }
+                $row = array();
+                for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
+                    $name = mysql_field_name($this->result, $c);
+                    if (array_key_exists($name, $row)) {
+                        if (!is_array($row[$name])) {
+                            $row[$name] = (array) $row[$name];
+                        }
+                        $row[$name][] = $tmp[$c];
+                    } else {
+                        $row[$name] = $tmp[$c];
+                    }
+                }
+                return $row;
             case EPDO::FETCH_FUNC: /* callback */
                 // TODO: check valid callback
                 if (FALSE === ($cbArgs = mysql_fetch_row($this->result))) {
@@ -569,7 +588,7 @@ class EPDOStatement implements Iterator {
                 if (mysql_num_fields($this->result) != 2) {
                     // error
                 }
-                if (FALSE !== $row = mysql_fetch_row($this->result)) {
+                if (FALSE !== ($row = mysql_fetch_row($this->result))) {
                     return array($row[0] => $row[1]);
                 } else {
                     return FALSE;
