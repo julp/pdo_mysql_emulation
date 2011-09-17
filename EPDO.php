@@ -3,6 +3,14 @@
  * CREDITS: based on initial work of stealth35 (https://github.com/stealth35/mysql_prepare)
  **/
 
+/**
+ * TODO:
+ * - fetchAll
+ * - transaction (beginTransaction, commit, rollback)
+ * - checks (query results, fetch* and setFetchMode arguments, etc)
+ * - PARAM_LOB ?
+ **/
+
 class EPDOException extends Exception {}
 
 class EPDO {
@@ -385,6 +393,12 @@ class EPDOStatement implements Iterator {
             case EPDO::PARAM_STR:
                 $value = strval($value);
                 break;
+            /*case EPDO::PARAM_LOB: // out only (bindColumn)
+                $fp = fopen('php://memory', 'w+');
+                fwrite($fp, $value);
+                rewind($fp);
+                $value = $fp;
+                break;*/
         }
     }
 
