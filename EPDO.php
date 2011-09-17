@@ -416,8 +416,13 @@ class EPDOStatement implements Iterator {
 
     public function setFetchMode($mode /*, ...*/) {
         // TODO: check arguments
-        $args = func_get_args();
-        $this->fetch_args = $args;
+        if ($mode === EPDO::FETCH_INTO) {
+            $obj = (object) func_get_arg(1);
+            $this->fetch_args = array(EPDO::FETCH_INTO, &$obj);
+        } else {
+            $args = func_get_args();
+            $this->fetch_args = $args;
+        }
     }
 
     private function _fetch(Array $args) {
@@ -528,9 +533,22 @@ class EPDOStatement implements Iterator {
                 // no break here !
             case EPDO::FETCH_OBJ:
                 return mysql_fetch_object($this->result);
-            case EPDO::FETCH_INTO:
-                // ???
-                return FALSE;
+            case EPDO::FETCH_INTO: /* &object */
+                if (FALSE === ($row = mysql_fetch_assoc($this->result))) {
+                    return FALSE;
+                }
+                // PDO::FETCH_INTO doesn't handle private properties (throw error or need to define __set)
+                //$ro = new ReflectionObject($args[0]);
+                foreach ($row as $k => $v) {
+                    /*if ($ro->hasProperty($k) && ($p = $ro->getProperty($k)) && ($p->isPrivate() || $p->isProtected())) {
+                        $p->setAccessible(TRUE);
+                        $p->setValue($args[0], $v);
+                        $p->setAccessible(FALSE);
+                    } else {*/
+                        $args[0]->$k = $v;
+                    /*}*/
+                }
+                return $args[0];
             case EPDO::FETCH_BOUND:
                 if (FALSE !== $row = mysql_fetch_row($this->result)) {
                     for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
@@ -564,14 +582,20 @@ class EPDOStatement implements Iterator {
     }
 
     public function fetch(/*$mode, ... */) {
-        return $this->_fetch(func_get_args());
+        // TODO: check arguments
+        if (func_num_args() /* == 2 */ && func_get_arg(0) === EPDO::FETCH_INTO) {
+            $obj = (object) func_get_arg(1);
+            return $this->_fetch(array(EPDO::FETCH_INTO, &$obj));
+        } else {
+            return $this->_fetch(func_get_args());
+        }
     }
 
     public function fetchObject($class_name = '', $ctor_args = array()) {
         return $this->_fetch(array(EPDO::FETCH_CLASS, $class_name, $ctor_args));
     }
 
-    // incomplete (UNIQUE, GROUP, KEY_PAIR // BOUND, INTO)
+    // temporary (UNIQUE, GROUP, KEY_PAIR // BOUND, INTO)
     public function fetchAll(/*$mode, ... */) {
         $rows = array();
         if (!func_num_args()) {
