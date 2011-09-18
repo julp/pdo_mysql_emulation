@@ -476,7 +476,7 @@ class EPDOStatement implements Iterator {
 
     public function setFetchMode($mode /*, ...*/) {
         // TODO: check arguments
-        if ($mode === EPDO::FETCH_INTO) {
+        if (EPDO::FETCH_INTO === $mode) {
             $obj = (object) func_get_arg(1);
             $this->fetch_args = array(EPDO::FETCH_INTO, &$obj);
         } else {
@@ -553,7 +553,7 @@ class EPDOStatement implements Iterator {
                     }
                 } else if ($nbArgs >= 1) {
                     $class_name = $args[0];
-                    $ctor_args = $nbArgs == 2 ? $args[1] : array();
+                    $ctor_args = 2 == $nbArgs ? $args[1] : array();
                 } else {
                     $class_name = '';
                 }
@@ -656,7 +656,7 @@ class EPDOStatement implements Iterator {
 
     public function fetch(/*$mode, ... */) {
         // TODO: check arguments
-        if (/* 2 == */func_num_args() && func_get_arg(0) === EPDO::FETCH_INTO) {
+        if (/* 2 == */func_num_args() && EPDO::FETCH_INTO === func_get_arg(0)) {
             $obj = (object) func_get_arg(1);
             return $this->_fetch(array(EPDO::FETCH_INTO, &$obj));
         } else {
@@ -696,8 +696,8 @@ class EPDOStatement implements Iterator {
         }
         if ($this->statement_id) {
             mysql_query('DEALLOCATE PREPARE `' . $this->statement_id . '`', $this->dbh->getLink());
-            $this->fetch_args = $this->in = $this->intypes = $this->out = $this->outtypes = array();
-            $this->placeholders = $this->statement_id = NULL;
+            $this->placeholders = $this->fetch_args = $this->in = $this->intypes = $this->out = $this->outtypes = array();
+            $this->statement_id = NULL;
         }
     }
 
