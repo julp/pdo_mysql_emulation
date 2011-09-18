@@ -6,9 +6,11 @@
 /**
  * TODO:
  * - fetchAll
- * - transaction (beginTransaction, commit, rollback)
  * - checks (query results, fetch* and setFetchMode arguments, etc)
  * - PARAM_LOB ?
+ *
+ * Known issues and limitations:
+ * - prepared statement can't mix anonymous and named markers (ie make a choice between ? and :foo)
  **/
 
 class EPDOException extends Exception {}
@@ -85,7 +87,7 @@ class EPDO {
         }
     }
 
-    public function __construct($dsn, $username = NULL, $password = NULL, $driver_options = array()) {
+    public function __construct($dsn, $username = NULL, $password = NULL, Array $driver_options = array()) {
         if (strpos($dsn, 'mysql:') !== 0) {
             throw new EPDOExeception('could not find driver');
         }
@@ -238,7 +240,7 @@ class EPDO {
 
 class EPDOStatement implements Iterator {
     private $dbh;
-    private $placeholders;
+    private $placeholders = array();
     private $statement_id;
     private $result = FALSE;
     private $current = FALSE;
@@ -339,17 +341,21 @@ class EPDOStatement implements Iterator {
     }
 
     private function _setVars(Array $input_parameters) {
-        $parameters = array();
-        foreach ($this->placeholders as $k => $v) {
-            if (!array_key_exists($v, $input_parameters)) {
-                throw new EPDOException(sprintf('parameter "%s" was not defined', $v));
+        if (!empty($this->placeholders)) {
+            $parameters = array();
+            foreach ($this->placeholders as $k => $v) {
+                if (!array_key_exists($v, $input_parameters)) {
+                    throw new EPDOException(sprintf('parameter "%s" was not defined', $v));
+                    return FALSE;
+                }
+                $parameters[$k] = $input_parameters[$v];
+            }
+            if (count($parameters) < count($this->placeholders)) {
+                throw new EPDOException('number of bound variables does not match number of tokens');
                 return FALSE;
             }
-            $parameters[$k] = $input_parameters[$v];
-        }
-        if (count($parameters) < count($this->placeholders)) {
-            throw new EPDOException('number of bound variables does not match number of tokens');
-            return FALSE;
+        } else {
+            $parameters = $input_parameters;
         }
         foreach ($parameters as $id => $parameter) {
             $key = sprintf('@`%s`', $id);
@@ -359,7 +365,6 @@ class EPDOStatement implements Iterator {
             } else {
                 $sf = '@`%s` = \'%s\'';
             }
-            //settype($parameter, 'string');
             $input_parameter = mysql_real_escape_string($parameter, $this->dbh->getLink());
             $sets[$key] = sprintf($sf, $id, $parameter);
         }
@@ -373,18 +378,15 @@ class EPDOStatement implements Iterator {
     public function execute($input_parameters = NULL) {
         if (is_array($input_parameters) && !empty($input_parameters)) {
             $safe_parameters = array();
-            // TODO: assume first numeric key is 0 and add 1 to all numeric keys
             foreach ($input_parameters as $k => $v) {
                 if (is_int($k)) {
-                    continue;
-                }
-                if (!is_string($k)) {
-                    // Exception
-                }
-                if ($k[0] === ':') {
                     $safe_parameters[$k] = $v;
-                } else {
-                    $safe_parameters[':' . $k] = $v;
+                } else /*if (is_string($k))*/ {
+                    if ($k[0] === ':') {
+                        $safe_parameters[$k] = $v;
+                    } else {
+                        $safe_parameters[':' . $k] = $v;
+                    }
                 }
             }
             $ext = $this->_setVars($safe_parameters);
@@ -637,7 +639,7 @@ class EPDOStatement implements Iterator {
                 }
                 return FALSE !== $row;
             case EPDO::FETCH_KEY_PAIR:
-                if (mysql_num_fields($this->result) != 2) {
+                if (2 != mysql_num_fields($this->result)) {
                     // error
                 }
                 if (FALSE !== ($row = mysql_fetch_row($this->result))) {
@@ -654,7 +656,7 @@ class EPDOStatement implements Iterator {
 
     public function fetch(/*$mode, ... */) {
         // TODO: check arguments
-        if (func_num_args() /* == 2 */ && func_get_arg(0) === EPDO::FETCH_INTO) {
+        if (/* 2 == */func_num_args() && func_get_arg(0) === EPDO::FETCH_INTO) {
             $obj = (object) func_get_arg(1);
             return $this->_fetch(array(EPDO::FETCH_INTO, &$obj));
         } else {
