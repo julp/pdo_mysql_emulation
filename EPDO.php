@@ -64,6 +64,7 @@ class EPDO {
     private $link;
     private $default_mode;
     private $attributes = array(
+        self::ATTR_AUTOCOMMIT         => NULL,
         self::ATTR_ERRMODE            => self::ERRMODE_SILENT,
         self::ATTR_DEFAULT_FETCH_MODE => self::FETCH_BOTH,
     );
@@ -103,6 +104,9 @@ class EPDO {
         if (!empty($params['charset'])) {
             mysql_set_charset($params['charset'], $this->link);
         }
+        foreach ($driver_options as $attribute => $value) {
+            $this->setAttribute($attribute, $value);
+        }
     }
 
     public function errorCode() {
@@ -127,6 +131,9 @@ class EPDO {
 
     public function getAttribute($attribute) {
         switch ($attribute) {
+            case self::ATTR_AUTOCOMMIT:
+                $res = mysql_query('SHOW VARIABLES LIKE "AUTOCOMMIT"', $this->link);
+                return 'ON' === strtoupper(mysql_result($res, 0, 1));
             case self::ATTR_DRIVER_NAME:
                 return 'mysql';
             case self::ATTR_CLIENT_VERSION:
@@ -141,7 +148,9 @@ class EPDO {
     }
 
     public function setAttribute($attribute, $value) {
-        if (!isset($this->attributes[$attribute])) {
+        if (self::ATTR_AUTOCOMMIT == $attribute) {
+            return (bool) mysql_query(((bool) $value) ? 'SET AUTOCOMMIT=1' : 'SET AUTOCOMMIT=0', $this->link);
+        } else if (!array_key_exists($attribute, $this->attributes)) {
             return FALSE;
         } else {
             $this->attributes[$attribute] = $value;
@@ -196,6 +205,22 @@ class EPDO {
         } else {
             return new EPDOStatement($statement_id, $this, $placeholders);
         }
+    }
+
+    public function inTransaction() {
+        return FALSE;
+    }
+
+    public function beginTransaction() {
+        return (bool) mysql_query('START TRANSACTION', $this->link);
+    }
+
+    public function commit() {
+        return (bool) mysql_query('COMMIT', $this->link);
+    }
+
+    public function rollback() {
+        return (bool) mysql_query('ROLLBACK', $this->link);
     }
 
     public function __sleep() {
@@ -663,11 +688,14 @@ class EPDOStatement implements Iterator {
     }
 
     public function closeCursor() {
+        if ($this->result) {
+            mysql_free_result($this->result);
+            $this->current = $this->result = FALSE;
+        }
         if ($this->statement_id) {
             mysql_query('DEALLOCATE PREPARE `' . $this->statement_id . '`', $this->dbh->getLink());
             $this->fetch_args = $this->in = $this->intypes = $this->out = $this->outtypes = array();
-            $this->placeholders = $this->statement_id = $this->result = NULL;
-            $this->current = FALSE;
+            $this->placeholders = $this->statement_id = NULL;
         }
     }
 
