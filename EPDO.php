@@ -7,10 +7,6 @@
  * TODO:
  * - fetchAll
  * - checks (query results, fetch* and setFetchMode arguments, etc)
- * - PARAM_LOB ?
- *
- * Known issues and limitations:
- * - prepared statement can't mix anonymous and named markers (ie make a choice between ? and :foo)
  **/
 
 class EPDOException extends Exception {}
@@ -191,6 +187,9 @@ class EPDO {
     public function prepare($statement, $driver_options = array()) {
         $statement_id = uniqid();
         if (preg_match_all('/:\w+/', $statement, $matches, PREG_SET_ORDER)) {
+            if (0 !== substr_count($statement, '?')) {
+                throw new EPDOException("Invalid parameter number: mixed named and positional parameters");
+            }
             $placeholders = array();
             foreach ($matches as $m) {
                 $placeholders[] = $m[0];
