@@ -84,7 +84,7 @@ class EPDO {
     }
 
     public function __construct($dsn, $username = NULL, $password = NULL, Array $driver_options = array()) {
-        if (strpos($dsn, 'mysql:') !== 0) {
+        if (0 !== strpos($dsn, 'mysql:')) {
             throw new EPDOException('could not find driver');
         }
         $params = array();
@@ -440,7 +440,7 @@ class EPDOStatement implements Iterator {
                 return FALSE;
             }
         } else {
-            if ($parameter[0] !== ':') {
+            if (':' !== $parameter[0]) {
                 $parameter = ':' . $parameter;
             }
             if (FALSE === array_search($parameter, $this->placeholders)) {
