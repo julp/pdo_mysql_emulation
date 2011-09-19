@@ -369,7 +369,7 @@ class EPDOStatement implements Iterator {
                 $input_parameter = mysql_real_escape_string(stream_get_contents($parameter), $this->dbh->getLink());
             }*/
             $input_parameter = mysql_real_escape_string($parameter, $this->dbh->getLink());
-            $sets[$key] = sprintf($sf, $id, $parameter);
+            $sets[$key] = sprintf($sf, $id, $input_parameter);
         }
         if (FALSE === mysql_query('SET ' . implode(',', $sets), $this->dbh->getLink())) {
             $this->checkError();
