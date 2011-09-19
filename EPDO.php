@@ -89,7 +89,7 @@ class EPDO {
 
     public function __construct($dsn, $username = NULL, $password = NULL, Array $driver_options = array()) {
         if (strpos($dsn, 'mysql:') !== 0) {
-            throw new EPDOExeception('could not find driver');
+            throw new EPDOException('could not find driver');
         }
         $params = array();
         preg_match_all('/([^=]+)=([^;]*)(?:;|$)/', $dsn, $matches, PREG_SET_ORDER, strlen('mysql:'));
