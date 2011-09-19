@@ -365,10 +365,11 @@ class EPDOStatement implements Iterator {
             } else {
                 $sf = '@`%s` = \'%s\'';
             }
-            /*if (is_resource($parameter) && 'stream' == get_resource_type($parameter)) {
+            if (is_resource($parameter) && 'stream' == get_resource_type($parameter)) {
                 $input_parameter = mysql_real_escape_string(stream_get_contents($parameter), $this->dbh->getLink());
-            }*/
-            $input_parameter = mysql_real_escape_string($parameter, $this->dbh->getLink());
+            } else {
+                $input_parameter = mysql_real_escape_string($parameter, $this->dbh->getLink());
+            }
             $sets[$key] = sprintf($sf, $id, $input_parameter);
         }
         if (FALSE === mysql_query('SET ' . implode(',', $sets), $this->dbh->getLink())) {
@@ -409,7 +410,7 @@ class EPDOStatement implements Iterator {
         return (bool) $this->result;
     }
 
-    private function _applyType(&$value, $type) {
+    private function _applyType(&$value, $type, $out = FALSE) {
         switch ($type) {
             case EPDO::PARAM_NULL:
                 $value = NULL;
@@ -423,12 +424,14 @@ class EPDOStatement implements Iterator {
             case EPDO::PARAM_STR:
                 $value = strval($value);
                 break;
-            /*case EPDO::PARAM_LOB: // out only (bindColumn)
-                $fp = fopen('php://memory', 'w+');
-                fwrite($fp, $value);
-                rewind($fp);
-                $value = $fp;
-                break;*/
+            case EPDO::PARAM_LOB:
+                if ($out) {
+                    $fp = fopen('php://memory', 'w+');
+                    fwrite($fp, $value);
+                    rewind($fp);
+                    $value = $fp;
+                }
+                break;
         }
     }
 
@@ -630,12 +633,12 @@ class EPDOStatement implements Iterator {
                     for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
                         if (array_key_exists($c + 1, $this->out)) {
                             $this->out[$c + 1] = $row[$c];
-                            $this->_applyType($this->out[$c + 1], $this->outtypes[$c + 1]);
+                            $this->_applyType($this->out[$c + 1], $this->outtypes[$c + 1], TRUE);
                         } else {
                             $fieldname = mysql_field_name($this->result, $c);
                             if (array_key_exists($fieldname, $this->out)) {
                                 $this->out[$fieldname] = $row[$c];
-                                $this->_applyType($this->out[$fieldname], $this->outtypes[$fieldname]);
+                                $this->_applyType($this->out[$fieldname], $this->outtypes[$fieldname], TRUE);
                             }
                         }
                     }
