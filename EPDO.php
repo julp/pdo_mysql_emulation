@@ -490,7 +490,7 @@ class EPDOStatement implements Iterator {
         }
     }
 
-    private function _fetch(Array $args) {
+    private function _fetch(Array $args, &$key = NULL) {
         if (!is_resource($this->result)) {
             return FALSE;
         }
@@ -505,46 +505,81 @@ class EPDOStatement implements Iterator {
             $mode = array_shift($args);
         }
         $nbArgs = count($args);
+        $shift = 2 == func_num_args() ? 1 : 0;
+        switch ($mode & ~EPDO::FETCH_FLAGS) {
+            case EPDO::FETCH_BOUND: // unconditional
+            case EPDO::FETCH_COLUMN: // unconditional
+                $shift = 0;
+            case EPDO::FETCH_NUM:
+            case EPDO::FETCH_FUNC:
+            case EPDO::FETCH_KEY_PAIR:
+                $row = mysql_fetch_row($this->result);
+                break;
+            case EPDO::FETCH_INTO: // unconditional
+                $shift = 0;
+            case EPDO::FETCH_ASSOC:
+            case EPDO::FETCH_NAMED:
+                $row = mysql_fetch_assoc($this->result);
+                break;
+            case EPDO::FETCH_BOTH:
+                $row = mysql_fetch_array($this->result);
+                break;
+            case EPDO::FETCH_OBJ:
+                if ($shift) {
+                    $row = mysql_fetch_assoc($this->result);
+                } else {
+                    return mysql_fetch_object($this->result);
+                }
+                break;
+            case EPDO::FETCH_CLASS:
+                // TODO: very specific case (FETCH_UNIQUE or FETCH_GROUP (shift == 1) + FETCH_CLASSTYPE)
+                $row = FALSE;
+                break;
+        }
+        if (FALSE === $row) {
+            return FALSE;
+        }
+        if (!$shift && in_array($mode & ~EPDO::FETCH_FLAGS, array(EPDO::FETCH_BOUND, EPDO::FETCH_NUM, EPDO::FETCH_INTO, EPDO::FETCH_ASSOC, EPDO::FETCH_BOTH), TRUE)) {
+            return $row;
+        }
         switch ($mode & ~EPDO::FETCH_FLAGS) {
             case EPDO::FETCH_COLUMN: /* $no = 0 */
                 $no = $nbArgs > 0 ? $args[0] : 0;
-                // assume $no < mysql_num_fields($this->result) ?
-                if (FALSE !== $row = mysql_fetch_row($this->result)) {
-                    return $row[$no];
-                } else {
-                    return FALSE;
-                }
+                // TODO: assume $no < mysql_num_fields($this->result)
+                return $row[$no];
             case EPDO::FETCH_BOTH:
-                return mysql_fetch_array($this->result);
+                // TODO: remove index *AND* key? (when shift)
+                return $row;
             case EPDO::FETCH_NUM:
-                return mysql_fetch_row($this->result);
             case EPDO::FETCH_ASSOC:
-                return mysql_fetch_assoc($this->result);
-            case EPDO::FETCH_NAMED:
-                if (FALSE === ($tmp = mysql_fetch_row($this->result))) {
-                    return FALSE;
-                }
-                $row = array();
-                for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
-                    $name = mysql_field_name($this->result, $c);
-                    if (array_key_exists($name, $row)) {
-                        if (!is_array($row[$name])) {
-                            $row[$name] = (array) $row[$name];
-                        }
-                        $row[$name][] = $tmp[$c];
-                    } else {
-                        $row[$name] = $tmp[$c];
-                    }
+                if ($shift) { // TODO: factorize
+                    $key = array_shift($row);
                 }
                 return $row;
+            case EPDO::FETCH_NAMED:
+                if ($shift) { // TODO: factorize
+                    $key = array_shift($row);
+                }
+                $res = array();
+                for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
+                    $name = mysql_field_name($this->result, $c);
+                    if (array_key_exists($name, $res)) {
+                        if (!is_array($row[$name])) {
+                            $res[$name] = (array) $res[$name];
+                        }
+                        $res[$name][] = $row[$c];
+                    } else {
+                        $res[$name] = $row[$c];
+                    }
+                }
+                return $res;
             case EPDO::FETCH_FUNC: /* callback */
                 // TODO: check valid callback
-                if (FALSE === ($cbArgs = mysql_fetch_row($this->result))) {
-                    return FALSE;
-                } else {
-                    return call_user_func_array($args[0], $cbArgs);
+                if ($shift) { // TODO: factorize
+                    $key = array_shift($row);
                 }
-            case EPDO::FETCH_CLASS: /* classname?, ctor_args? */
+                return call_user_func_array($args[0], $row);
+            case EPDO::FETCH_CLASS: /* classname?, ctor_args? */ // TODO
                 // default (pdo as mysql_fetch_object): array_merge($this->fetch(), object properties) then __construct
                 // late: __construct then array_merge($this->fetch(), object properties)
                 $late = ($mode & EPDO::FETCH_PROPS_LATE) || (($mode & EPDO::FETCH_CLASSTYPE) && !method_exists('ReflectionClass', 'newInstanceWithoutConstructor'));
@@ -609,12 +644,9 @@ class EPDOStatement implements Iterator {
                     }
                 }
                 // no break here !
-            case EPDO::FETCH_OBJ:
+            case EPDO::FETCH_OBJ: // TODO
                 return mysql_fetch_object($this->result);
             case EPDO::FETCH_INTO: /* &object */
-                if (FALSE === ($row = mysql_fetch_assoc($this->result))) {
-                    return FALSE;
-                }
                 // PDO::FETCH_INTO doesn't handle private properties (throw error or need to define __set)
                 //$ro = new ReflectionObject($args[0]);
                 foreach ($row as $k => $v) {
@@ -628,29 +660,29 @@ class EPDOStatement implements Iterator {
                 }
                 return $args[0];
             case EPDO::FETCH_BOUND:
-                if (FALSE !== $row = mysql_fetch_row($this->result)) {
-                    for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
-                        if (array_key_exists($c + 1, $this->out)) {
-                            $this->out[$c + 1] = $row[$c];
-                            $this->_applyType($this->out[$c + 1], $this->outtypes[$c + 1], TRUE);
-                        } else {
-                            $fieldname = mysql_field_name($this->result, $c);
-                            if (array_key_exists($fieldname, $this->out)) {
-                                $this->out[$fieldname] = $row[$c];
-                                $this->_applyType($this->out[$fieldname], $this->outtypes[$fieldname], TRUE);
-                            }
+                for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
+                    if (array_key_exists($c + 1, $this->out)) {
+                        $this->out[$c + 1] = $row[$c];
+                        $this->_applyType($this->out[$c + 1], $this->outtypes[$c + 1], TRUE);
+                    } else {
+                        $fieldname = mysql_field_name($this->result, $c);
+                        if (array_key_exists($fieldname, $this->out)) {
+                            $this->out[$fieldname] = $row[$c];
+                            $this->_applyType($this->out[$fieldname], $this->outtypes[$fieldname], TRUE);
                         }
                     }
                 }
-                return FALSE !== $row;
+                return TRUE;
             case EPDO::FETCH_KEY_PAIR:
-                if (2 != mysql_num_fields($this->result)) {
+                // TODO: check we have exactly 2 fields
+                /*if (2 != mysql_num_fields($this->result)) {
                     // error
-                }
-                if (FALSE !== ($row = mysql_fetch_row($this->result))) {
-                    return array($row[0] => $row[1]);
+                }*/
+                if ($shift) {
+                    $key = $row[0];
+                    return $row[1];
                 } else {
-                    return FALSE;
+                    return array($row[0] => $row[1]);
                 }
         }
     }
@@ -679,17 +711,28 @@ class EPDOStatement implements Iterator {
         if (!func_num_args()) {
             if ($this->fetch_args) {
                 $args = $this->fetch_args;
-                $mode = array_shift($args);
+                $mode = $args[0];
             } else {
-                $args = array();
                 $mode = $this->dbh->getAttribute(EPDO::ATTR_DEFAULT_FETCH_MODE);
+                $args = array($mode);
             }
         } else {
             $args = func_get_args();
-            $mode = array_shift($args);
+            $mode = $args[0];
         }
-        while ($row = $this->_fetch($args)) {
-            $rows[] = $row;
+        if (0 == ($mode & EPDO::FETCH_GROUP) && EPDO::FETCH_KEY_PAIR != $mode) {
+            while ($row = $this->_fetch($args)) {
+                $rows[] = $row;
+            }
+        /*} else if (EPDO::FETCH_KEY_PAIR == $mode) {*/
+        } else if (EPDO::FETCH_KEY_PAIR == $mode || EPDO::FETCH_UNIQUE == ($mode & EPDO::FETCH_UNIQUE)) {
+            while ($row = $this->_fetch($args, $key)) {
+                $rows[$key] = $row;
+            }
+        } else /*if ($mode & EPDO::FETCH_GROUP)*/ {
+            while ($row = $this->_fetch($args, $key)) {
+                $rows[$key][] = $row;
+            }
         }
         return $rows;
     }
