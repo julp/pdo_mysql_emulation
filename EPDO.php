@@ -18,27 +18,27 @@ class EPDO {
     const FETCH_NAMED      = 4;
     const FETCH_OBJ        = 5;
     const FETCH_CLASS      = 6;
-    const FETCH_INTO       = 7;
+    const FETCH_INTO       = 7; // no sense with fetchAll even if not rejected by PDO
     const FETCH_KEY_PAIR   = 8;
-    const FETCH_FUNC       = 9;
+    const FETCH_FUNC       = 9; // fetchAll only according to PDO
     const FETCH_LAZY       = 10;
-    const FETCH_BOUND      = 11;
-    const FETCH_COLUMN     = 12;
+    const FETCH_BOUND      = 11; // no sense with fetchAll even if not rejected by PDO
+    const FETCH_COLUMN     = 12; // no sense with fetchAll *and* UNIQUE or GROUP option
 
     const FETCH_FLAGS      = 0xFFFF0000;
-    const FETCH_GROUP      = 0x00010000;
-    const FETCH_UNIQUE     = 0x00030000;
-    const FETCH_CLASSTYPE  = 0x00040000;
-    const FETCH_SERIALIZE  = 0x00080000;
-    const FETCH_PROPS_LATE = 0x00100000;
+    const FETCH_GROUP      = 0x00010000; // fetchAll only
+    const FETCH_UNIQUE     = 0x00030000; // fetchAll only
+    const FETCH_CLASSTYPE  = 0x00040000; // implies FETCH_CLASS
+    const FETCH_SERIALIZE  = 0x00080000; // implies FETCH_CLASS
+    const FETCH_PROPS_LATE = 0x00100000; // not available, compatibility only
 
     const PARAM_NULL         = __LINE__;
     const PARAM_BOOL         = __LINE__;
     const PARAM_INT          = __LINE__;
     const PARAM_STR          = __LINE__;
     const PARAM_LOB          = __LINE__;
-    const PARAM_STMT         = __LINE__;
-    const PARAM_INPUT_OUTPUT = __LINE__;
+    const PARAM_STMT         = __LINE__; // not available, compatibility only
+    const PARAM_INPUT_OUTPUT = __LINE__; // not available, compatibility only
 
     const ATTR_ERRMODE            = __LINE__;
     const ATTR_CLIENT_VERSION     = __LINE__;
@@ -399,7 +399,7 @@ class EPDOStatement implements Iterator {
             }
             $ext = $this->_setVars($this->in);
         } else {
-            $ext = sprintf('EXECUTE `%s`', $this->statement_id);
+            $ext = 'EXECUTE `' . $this->statement_id . '`';
         }
         if (FALSE === $ext) {
             return FALSE;
