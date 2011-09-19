@@ -693,7 +693,7 @@ class EPDOStatement implements Iterator {
     }
 
     public function closeCursor() {
-        if ($this->result) {
+        if (is_resource($this->result)) {
             mysql_free_result($this->result);
             $this->current = $this->result = FALSE;
         }
