@@ -491,7 +491,7 @@ class EPDOStatement implements Iterator {
     }
 
     private function _fetch(Array $args) {
-        if (!$this->result) {
+        if (!is_resource($this->result)) {
             return FALSE;
         }
         if (!$args) {
