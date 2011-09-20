@@ -60,9 +60,10 @@ class EPDO {
     const ERRMODE_EXCEPTION = __LINE__;
 
     private $link;
-    private $default_mode;
+    private $in_txn;
     private $attributes = array(
         self::ATTR_AUTOCOMMIT         => NULL,
+        self::ATTR_STATEMENT_CLASS    => 'EPDOStatement',
         self::ATTR_ERRMODE            => self::ERRMODE_SILENT,
         self::ATTR_CASE               => self::CASE_NATURAL,
         self::ATTR_DEFAULT_FETCH_MODE => self::FETCH_BOTH,
@@ -149,12 +150,18 @@ class EPDO {
     public function setAttribute($attribute, $value) {
         if (self::ATTR_AUTOCOMMIT == $attribute) {
             return (bool) mysql_query(((bool) $value) ? 'SET AUTOCOMMIT=1' : 'SET AUTOCOMMIT=0', $this->link);
+        } else if (self::ATTR_STATEMENT_CLASS == $attribute) {
+            // PDO::ATTR_STATEMENT_CLASS requires format array(classname, array(ctor_args)); the classname must be a string specifying an existing class
+            // user-supplied statement class cannot have a public constructor
+            // PDO::ATTR_STATEMENT_CLASS requires format array(classname, array(ctor_args)); ctor_args must be an array
+            if (!is_subclass_of($value, 'EPDOStatement')) {
+                throw new EPDOException('user-supplied statement class must be derived from PDOStatement');
+            }
         } else if (!array_key_exists($attribute, $this->attributes)) {
             return FALSE;
-        } else {
-            $this->attributes[$attribute] = $value;
-            return TRUE;
         }
+        $this->attributes[$attribute] = $value;
+        return TRUE;
     }
 
     public function lastInsertId() {
@@ -210,19 +217,34 @@ class EPDO {
     }
 
     public function inTransaction() {
-        return FALSE;
+        return (bool) $this->in_txn;
     }
 
     public function beginTransaction() {
-        return (bool) mysql_query('START TRANSACTION', $this->link);
+        if (TRUE === $this->in_txn) {
+            throw new EPDOException('There is already an active transaction');
+        } else {
+            $this->in_txn = TRUE;
+            return (bool) mysql_query('START TRANSACTION', $this->link);
+        }
     }
 
     public function commit() {
-        return (bool) mysql_query('COMMIT', $this->link);
+        if (!$this->in_txn) {
+            throw new EPDOException('There is no active transaction');
+        } else {
+            $this->in_txn = FALSE;
+            return (bool) mysql_query('COMMIT', $this->link);
+        }
     }
 
     public function rollback() {
-        return (bool) mysql_query('ROLLBACK', $this->link);
+        if (!$this->in_txn) {
+            throw new EPDOException('There is no active transaction');
+        } else {
+            $this->in_txn = FALSE;
+            return (bool) mysql_query('ROLLBACK', $this->link);
+        }
     }
 
     public function __sleep() {
