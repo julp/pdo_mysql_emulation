@@ -519,28 +519,50 @@ class EPDOStatement implements Iterator {
                 $shift = 0;
             case EPDO::FETCH_ASSOC:
             case EPDO::FETCH_NAMED:
-                $row = mysql_fetch_assoc($this->result);
+                $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)?
                 break;
             case EPDO::FETCH_BOTH:
-                $row = mysql_fetch_array($this->result);
+                $row = mysql_fetch_array($this->result); // TODO: unsafe *when* shifted (homonyms)?
                 break;
             case EPDO::FETCH_OBJ:
-                if ($shift) {
-                    $row = mysql_fetch_assoc($this->result);
+                if ($shift/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
+                    $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)?
                 } else {
                     return mysql_fetch_object($this->result);
                 }
                 break;
             case EPDO::FETCH_CLASS:
                 // TODO: very specific case (FETCH_UNIQUE or FETCH_GROUP (shift == 1) + FETCH_CLASSTYPE)
-                $row = FALSE;
+                $late = ($mode & EPDO::FETCH_PROPS_LATE) || (($mode & EPDO::FETCH_CLASSTYPE) && !method_exists('ReflectionClass', 'newInstanceWithoutConstructor'));
+                $totalshift = $shift + (0 != ($mode & EPDO::FETCH_CLASSTYPE));
+                if ($nbArgs > 0) {
+                    $class_name = $args[0];
+                    $ctor_args = 2 == $nbArgs ? $args[1] : array();
+                } else {
+                    $class_name = '';
+                    $ctor_args = NULL; // or array()?
+                }
+                if ($shift || $late/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
+                    $row = mysql_fetch_row($this->result); // with assoc, columns with the same name will be lost
+                } else {
+                    if ($class_name && class_exists($class_name)) { // call autoload
+                        return mysql_fetch_object($this->result, $class_name, $ctor_args);
+                    } else {
+                        // TODO: emit a "warning"?
+                        return mysql_fetch_object($this->result);
+                    }
+                }
                 break;
         }
         if (FALSE === $row) {
             return FALSE;
         }
-        if (!$shift && in_array($mode & ~EPDO::FETCH_FLAGS, array(EPDO::FETCH_BOUND, EPDO::FETCH_NUM, EPDO::FETCH_INTO, EPDO::FETCH_ASSOC, EPDO::FETCH_BOTH), TRUE)) {
+        // TODO: apply ATTR_CASE? (only for mysql_fetch_assoc and mysql_fetch_array)
+        if (!$shift && in_array($mode & ~EPDO::FETCH_FLAGS, array(EPDO::FETCH_NUM, EPDO::FETCH_ASSOC, EPDO::FETCH_BOTH), TRUE)) {
             return $row;
+        }
+        if ($shift && in_array($mode & ~EPDO::FETCH_FLAGS, array(EPDO::FETCH_BOTH, EPDO::FETCH_NUM, EPDO::FETCH_ASSOC, EPDO::FETCH_NAMED, EPDO::FETCH_FUNC, EPDO::FETCH_OBJ), TRUE)) {
+            $key = array_shift($row);
         }
         switch ($mode & ~EPDO::FETCH_FLAGS) {
             case EPDO::FETCH_COLUMN: /* $no = 0 */
@@ -548,18 +570,14 @@ class EPDOStatement implements Iterator {
                 // TODO: assume $no < mysql_num_fields($this->result)
                 return $row[$no];
             case EPDO::FETCH_BOTH:
-                // TODO: remove index *AND* key? (when shift)
+                if ($shift) {
+                    unset($row[mysql_field_name($this->result, 0)]);
+                }
                 return $row;
             case EPDO::FETCH_NUM:
             case EPDO::FETCH_ASSOC:
-                if ($shift) { // TODO: factorize
-                    $key = array_shift($row);
-                }
                 return $row;
             case EPDO::FETCH_NAMED:
-                if ($shift) { // TODO: factorize
-                    $key = array_shift($row);
-                }
                 $res = array();
                 for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
                     $name = mysql_field_name($this->result, $c);
@@ -575,77 +593,60 @@ class EPDOStatement implements Iterator {
                 return $res;
             case EPDO::FETCH_FUNC: /* callback */
                 // TODO: check valid callback
-                if ($shift) { // TODO: factorize
+                return call_user_func_array($args[0], $row);
+            case EPDO::FETCH_CLASS: /* classname?, ctor_args? */
+                // default (pdo as mysql_fetch_object): array_merge($this->fetch(), object properties) > __construct
+                // late: __construct > array_merge($this->fetch(), object properties)
+                // ----------
+                // shifting: CLASSTYPE > UNIQUE/GROUP key
+                if ($mode & EPDO::FETCH_CLASSTYPE) {
+                    $class_name = array_shift($row);
+                }
+                if ($shift) {
                     $key = array_shift($row);
                 }
-                return call_user_func_array($args[0], $row);
-            case EPDO::FETCH_CLASS: /* classname?, ctor_args? */ // TODO
-                // default (pdo as mysql_fetch_object): array_merge($this->fetch(), object properties) then __construct
-                // late: __construct then array_merge($this->fetch(), object properties)
-                $late = ($mode & EPDO::FETCH_PROPS_LATE) || (($mode & EPDO::FETCH_CLASSTYPE) && !method_exists('ReflectionClass', 'newInstanceWithoutConstructor'));
-                if ($mode & EPDO::FETCH_CLASSTYPE) {
-                    if (FALSE === ($row = mysql_fetch_assoc($this->result))) {
-                        return FALSE;
-                    }
-                    $class_name = array_shift($row);
-                    if (!$class_name || !class_exists($class_name)) { // call autoload
+                if ($class_name && class_exists($class_name) && ($late || ($mode & EPDO::FETCH_CLASSTYPE))) {
+                    $rc = new ReflectionClass($class_name);
+                    if (!$rc->isInstantiable()) {
                         // error
                     }
-                } else if ($nbArgs >= 1) {
-                    $class_name = $args[0];
-                    $ctor_args = 2 == $nbArgs ? $args[1] : array();
-                } else {
-                    $class_name = '';
-                }
-                if ($late) {
-                    if (FALSE === ($row = mysql_fetch_assoc($this->result))) {
-                        return FALSE;
-                    }
-                }
-                if ($class_name) {
-                    if ($late || ($mode & EPDO::FETCH_CLASSTYPE)) {
-                        $rc = new ReflectionClass($class_name);
-                        if (!$rc->isInstantiable()) {
+                    if (NULL !== ($ctor = $rc->getConstructor())) {
+                        if ($ctor->getNumberOfRequiredParameters() < count($ctor_args)) {
                             // error
                         }
-                        if (NULL !== ($ctor = $rc->getConstructor())) {
-                            if ($ctor->getNumberOfRequiredParameters() < count($ctor_args)) {
-                                // error
-                            }
-                        }
-                        if (!$late) {
-                            $obj = $rc->newInstanceWithoutConstructor();
-                        } else {
-                            if ($ctor_args) {
-                                $obj = $rc->newInstanceArgs($ctor_args);
-                            } else {
-                                $obj = $rc->newInstance();
-                            }
-                        }
-                        foreach ($row as $k => $v) {
-                            if ($rc->hasProperty($k) && ($p = $rc->getProperty($k)) && ($p->isPrivate() || $p->isProtected())) {
-                                $p->setAccessible(TRUE);
-                                $p->setValue($obj, $v);
-                                $p->setAccessible(FALSE);
-                            } else {
-                                $obj->$k = $v;
-                            }
-                        }
-                        if (!$late) {
-                            if ($ctor_args) {
-                                $ctor->invokeArgs($obj, $ctor_args);
-                            } else {
-                                $ctor->invoke($obj);
-                            }
-                        }
-                        return $obj;
-                    } else if (class_exists($class_name)) { // call autoload
-                        return mysql_fetch_object($this->result, $class_name, $ctor_args);
                     }
+                    if (!$late) {
+                        $obj = $rc->newInstanceWithoutConstructor();
+                    } else {
+                        if ($ctor_args) {
+                            $obj = $rc->newInstanceArgs($ctor_args);
+                        } else {
+                            $obj = $rc->newInstance();
+                        }
+                    }
+                    foreach ($row as $i => $v) {
+                        $k = mysql_field_name($this->result, $i + $totalshift);
+                        // TODO: apply ATTR_CASE on $k
+                        if ($rc->hasProperty($k) && ($p = $rc->getProperty($k)) && ($p->isPrivate() || $p->isProtected())) {
+                            $p->setAccessible(TRUE);
+                            $p->setValue($obj, $v);
+                            $p->setAccessible(FALSE);
+                        } else {
+                            $obj->$k = $v;
+                        }
+                    }
+                    if (!$late && NULL !== $ctor) {
+                        if ($ctor_args) {
+                            $ctor->invokeArgs($obj, $ctor_args);
+                        } else {
+                            $ctor->invoke($obj);
+                        }
+                    }
+                    return $obj;
                 }
-                // no break here !
-            case EPDO::FETCH_OBJ: // TODO
-                return mysql_fetch_object($this->result);
+                // no break here !!!
+            case EPDO::FETCH_OBJ:
+                return (object) $row;
             case EPDO::FETCH_INTO: /* &object */
                 // PDO::FETCH_INTO doesn't handle private properties (throw error or need to define __set)
                 //$ro = new ReflectionObject($args[0]);
@@ -705,7 +706,7 @@ class EPDOStatement implements Iterator {
         return $this->_fetch(array(EPDO::FETCH_CLASS, $class_name, $ctor_args));
     }
 
-    // temporary (UNIQUE, GROUP, KEY_PAIR // BOUND, INTO)
+    // TODO: reject BOUND, INTO, (GROUP or UNIQUE) + COLUMN?
     public function fetchAll(/*$mode, ... */) {
         $rows = array();
         if (!func_num_args()) {
