@@ -29,7 +29,7 @@ class EPDO {
     const FETCH_GROUP      = 0x00010000; // fetchAll only
     const FETCH_UNIQUE     = 0x00030000; // fetchAll only
     const FETCH_CLASSTYPE  = 0x00040000; // implies FETCH_CLASS
-    const FETCH_SERIALIZE  = 0x00080000; // implies FETCH_CLASS
+    const FETCH_SERIALIZE  = 0x00080000; // implies FETCH_CLASS - not (yet) implemented
     const FETCH_PROPS_LATE = 0x00100000; // not available, compatibility only
 
     const PARAM_NULL         = __LINE__;
@@ -64,6 +64,7 @@ class EPDO {
     private $attributes = array(
         self::ATTR_AUTOCOMMIT         => NULL,
         self::ATTR_ERRMODE            => self::ERRMODE_SILENT,
+        self::ATTR_CASE               => self::CASE_NATURAL,
         self::ATTR_DEFAULT_FETCH_MODE => self::FETCH_BOTH,
     );
 
@@ -225,11 +226,11 @@ class EPDO {
     }
 
     public function __sleep() {
-        throw new EPDOException('You cannot serialize or unserialize ' . version_compare(PHP_VERSION, '5.3.0', '>=') ? get_called_class() : __CLASS__ . ' instances');
+        throw new EPDOException('You cannot serialize or unserialize ' . __CLASS__ . ' instances');
     }
 
     public function __wakeup() {
-        throw new EPDOException('You cannot serialize or unserialize ' . version_compare(PHP_VERSION, '5.3.0', '>=') ? get_called_class() : __CLASS__ . ' instances');
+        throw new EPDOException('You cannot serialize or unserialize ' . __CLASS__ . ' instances');
     }
 
     public function __destruct() {
@@ -532,7 +533,6 @@ class EPDOStatement implements Iterator {
                 }
                 break;
             case EPDO::FETCH_CLASS:
-                // TODO: very specific case (FETCH_UNIQUE or FETCH_GROUP (shift == 1) + FETCH_CLASSTYPE)
                 $late = ($mode & EPDO::FETCH_PROPS_LATE) || (($mode & EPDO::FETCH_CLASSTYPE) && !method_exists('ReflectionClass', 'newInstanceWithoutConstructor'));
                 $totalshift = $shift + (0 != ($mode & EPDO::FETCH_CLASSTYPE));
                 if ($nbArgs > 0) {
@@ -748,6 +748,14 @@ class EPDOStatement implements Iterator {
             $this->placeholders = $this->fetch_args = $this->in = $this->intypes = $this->out = $this->outtypes = array();
             $this->statement_id = NULL;
         }
+    }
+
+    public function __sleep() {
+        throw new EPDOException('You cannot serialize or unserialize ' . __CLASS__ . ' instances');
+    }
+
+    public function __wakeup() {
+        throw new EPDOException('You cannot serialize or unserialize ' . __CLASS__ . ' instances');
     }
 
     public function __destruct() {
