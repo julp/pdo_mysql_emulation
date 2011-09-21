@@ -4,6 +4,10 @@
  **/
 
 /**
+ * REQUIRES:
+ * - PHP >= 5.1.0 (for LOB)
+ * - mbstring
+ *
  * TODO:
  * - fetchAll
  * - checks (query results, fetch* and setFetchMode arguments, etc)
@@ -347,11 +351,15 @@ class EPDOStatement implements Iterator {
     }
 
     public function getAttribute($attribute) {
-        return call_user_func_array(array($this->dbh, __FUNCTION__), func_get_args());
+        // TODO: depends on ATTR_ERRMODE
+        throw new Exception("This driver doesn't support getting attributes");
+        return FALSE;
     }
 
     public function setAttribute($attribute, $value) {
-        return call_user_func_array(array($this->dbh, __FUNCTION__), func_get_args());
+        // TODO: depends on ATTR_ERRMODE
+        throw new Exception("This driver doesn't support setting attributes");
+        return FALSE;
     }
 
     public function getColumnMeta($colno) {
@@ -388,7 +396,7 @@ class EPDOStatement implements Iterator {
                 $sf = '@`%s` = \'%s\'';
             }
             if (is_resource($parameter) && 'stream' == get_resource_type($parameter)) {
-                $input_parameter = mysql_real_escape_string(stream_get_contents($parameter), $this->dbh->getLink());
+                $input_parameter = mysql_real_escape_string(stream_get_contents($parameter, -1, 0), $this->dbh->getLink());
             } else {
                 $input_parameter = mysql_real_escape_string($parameter, $this->dbh->getLink());
             }
@@ -438,7 +446,7 @@ class EPDOStatement implements Iterator {
                 $value = NULL;
                 break;
             case EPDO::PARAM_BOOL:
-                $value = !!$value;
+                $value = (bool) $value;
                 break;
             case EPDO::PARAM_INT:
                 $value = intval($value);
@@ -513,6 +521,18 @@ class EPDOStatement implements Iterator {
         }
     }
 
+    private function _applyCase(&$value) {
+        static $cases = array(EPDO::CASE_LOWER => 'CASE_LOWER', EPDO::CASE_UPPER => 'CASE_UPPER');
+        if (isset($cases[$this->dbh->getAttribute(EPDO::ATTR_CASE)])) {
+            $case = $cases[$this->dbh->getAttribute(EPDO::ATTR_CASE)];
+            if (is_array($value)) {
+                $value = array_change_key_case($value, constant($case));
+            } else if (is_string($value)) {
+                $value = mb_convert_case($value, constant('MB_' . $case));
+            }
+        }
+    }
+
     private function _fetch(Array $args, &$key = NULL) {
         if (!is_resource($this->result)) {
             return FALSE;
@@ -559,16 +579,20 @@ class EPDOStatement implements Iterator {
                 $totalshift = $shift + (0 != ($mode & EPDO::FETCH_CLASSTYPE));
                 if ($nbArgs > 0) {
                     $class_name = $args[0];
-                    $ctor_args = 2 == $nbArgs ? $args[1] : array();
+                    $ctor_args = 2 == $nbArgs ? $args[1] : NULL;
                 } else {
                     $class_name = '';
-                    $ctor_args = NULL; // or array()?
+                    $ctor_args = NULL;
                 }
-                if ($shift || $late/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
+                if ($totalshift || $late/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
                     $row = mysql_fetch_row($this->result); // with assoc, columns with the same name will be lost
                 } else {
                     if ($class_name && class_exists($class_name)) { // call autoload
-                        return mysql_fetch_object($this->result, $class_name, $ctor_args);
+                        if (NULL === $ctor_args) {
+                            return mysql_fetch_object($this->result, $class_name);
+                        } else {
+                            return mysql_fetch_object($this->result, $class_name, $ctor_args);
+                        }
                     } else {
                         // TODO: emit a "warning"?
                         return mysql_fetch_object($this->result);
