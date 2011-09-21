@@ -5,7 +5,7 @@
 
 /**
  * REQUIRES:
- * - PHP >= 5.1.0 (for LOB)
+ * - PHP >= 5.1.0 (LOB)
  * - mbstring
  *
  * TODO:
@@ -67,7 +67,7 @@ class EPDO {
     private $in_txn;
     private $attributes = array(
         self::ATTR_AUTOCOMMIT         => NULL,
-        self::ATTR_STATEMENT_CLASS    => 'EPDOStatement',
+        self::ATTR_STATEMENT_CLASS    => array('EPDOStatement', array()),
         self::ATTR_ERRMODE            => self::ERRMODE_SILENT,
         self::ATTR_CASE               => self::CASE_NATURAL,
         self::ATTR_DEFAULT_FETCH_MODE => self::FETCH_BOTH,
@@ -102,6 +102,7 @@ class EPDO {
             throw new EPDOException('');
         }*/
         $this->link = mysql_connect($params['host'], $username, $password);
+        // TODO: check $this->link
         if (!empty($params['dbname'])) {
             mysql_select_db($params['dbname'], $this->link);
         }
@@ -155,11 +156,18 @@ class EPDO {
         if (self::ATTR_AUTOCOMMIT == $attribute) {
             return (bool) mysql_query(((bool) $value) ? 'SET AUTOCOMMIT=1' : 'SET AUTOCOMMIT=0', $this->link);
         } else if (self::ATTR_STATEMENT_CLASS == $attribute) {
-            // PDO::ATTR_STATEMENT_CLASS requires format array(classname, array(ctor_args)); the classname must be a string specifying an existing class
-            // user-supplied statement class cannot have a public constructor
-            // PDO::ATTR_STATEMENT_CLASS requires format array(classname, array(ctor_args)); ctor_args must be an array
-            if (!is_subclass_of($value, 'EPDOStatement')) {
+            if (!is_array($value) || !isset($value[0])) {
+                throw new EPDOException('EPDO::ATTR_STATEMENT_CLASS requires format array(classname, array(ctor_args)); the classname must be a string specifying an existing class');
+            }
+            $rc = new ReflectionClass($value[0]);
+            if (!$rc->isSubclassOf('EPDOStatement')) {
                 throw new EPDOException('user-supplied statement class must be derived from PDOStatement');
+            }
+            /*if (NULL !== ($ctor = $rc->getConstructor()) && $ctor->isPublic()) {
+                throw new EPDOException('user-supplied statement class cannot have a public constructor');
+            }*/
+            if (!isset($value[1]) || !is_array($value[1])) {
+                throw new EPDOException('EPDO::ATTR_STATEMENT_CLASS requires format array(classname, array(ctor_args)); ctor_args must be an array');
             }
         } else if (!array_key_exists($attribute, $this->attributes)) {
             return FALSE;
@@ -188,7 +196,26 @@ class EPDO {
         if (FALSE === $ret) {
             return $ret;
         } else {
-            return new EPDOStatement($ret, $this);
+            $rc = new ReflectionClass($this->attributes[self::ATTR_STATEMENT_CLASS][0]);
+            if (NULL !== ($ctor = $rc->getConstructor())) {
+                $ctor->setAccessible(TRUE);
+                $stmt = $rc->newInstanceArgs($this->attributes[self::ATTR_STATEMENT_CLASS][1]);
+                $ctor->setAccessible(FALSE);
+            } else {
+                $stmt = $rc->newInstance();
+            }
+            $p = $rc->getProperty('result');
+            $p->setAccessible(TRUE);
+            $p->setValue($stmt, $ret);
+            $p->setAccessible(FALSE);
+            $p = $rc->getProperty('dbh');
+            $p->setAccessible(TRUE);
+            $p->setValue($stmt, $this);
+            $p->setAccessible(FALSE);
+            $p = $rc->getProperty('queryString');
+            $p->setValue($stmt, $statement);
+            return $stmt;
+            //return new EPDOStatement($ret, $this);
         }
     }
 
@@ -197,6 +224,7 @@ class EPDO {
     }
 
     public function prepare($statement, $driver_options = array()) {
+        $original_statement = $statement;
         $statement_id = uniqid();
         if (preg_match_all('/:\w+/', $statement, $matches, PREG_SET_ORDER)) {
             if (0 !== substr_count($statement, '?')) {
@@ -216,7 +244,30 @@ class EPDO {
         if (FALSE === $ret) {
             return $ret;
         } else {
-            return new EPDOStatement($statement_id, $this, $placeholders);
+            $rc = new ReflectionClass($this->attributes[self::ATTR_STATEMENT_CLASS][0]);
+            if (NULL !== ($ctor = $rc->getConstructor())) {
+                $ctor->setAccessible(TRUE);
+                $stmt = $rc->newInstanceArgs($this->attributes[self::ATTR_STATEMENT_CLASS][1]);
+                $ctor->setAccessible(FALSE);
+            } else {
+                $stmt = $rc->newInstance();
+            }
+            $p = $rc->getProperty('statement_id');
+            $p->setAccessible(TRUE);
+            $p->setValue($stmt, $statement_id);
+            $p->setAccessible(FALSE);
+            $p = $rc->getProperty('dbh');
+            $p->setAccessible(TRUE);
+            $p->setValue($stmt, $this);
+            $p->setAccessible(FALSE);
+            $p = $rc->getProperty('placeholders');
+            $p->setAccessible(TRUE);
+            $p->setValue($stmt, $placeholders);
+            $p->setAccessible(FALSE);
+            $p = $rc->getProperty('queryString');
+            $p->setValue($stmt, $original_statement);
+            return $stmt;
+            //return new EPDOStatement($statement_id, $this, $placeholders);
         }
     }
 
@@ -265,10 +316,10 @@ class EPDO {
 }
 
 class EPDOStatement implements Iterator {
-    private $dbh;
-    private $placeholders = array();
-    private $statement_id;
-    private $result = FALSE;
+    /*private*/protected $dbh;
+    /*private*/protected $placeholders = array();
+    /*private*/protected $statement_id;
+    /*private*/protected $result = FALSE;
     private $current = FALSE;
 
     private $in = array();       // bindParam, bindValue
@@ -278,24 +329,6 @@ class EPDOStatement implements Iterator {
     private $fetch_args = array();
 
     public $queryString = '';
-
-    const FETCH_MASK = 0;
-    const FETCH_ALL_MASK = 0;
-
-    //public static final function createForStatement
-
-    public final function __construct(/*$qs, */$arg, EPDO $dbh, $placeholders = NULL) {
-        $this->dbh = $dbh;
-        /*$this->queryString = $qs;*/
-        if (is_resource($arg)) {
-            $this->result = $arg;
-        } else {
-            $this->statement_id = $arg;
-        }
-        if ($placeholders) {
-            $this->placeholders = $placeholders;
-        }
-    }
 
     public function __set($name, $value) {
         throw new EPDOException(version_compare(PHP_VERSION, '5.3.0', '>=') ? get_called_class() : __CLASS__ . "'s attributes are read only");
