@@ -555,21 +555,21 @@ class EPDOStatement implements Iterator {
                 $shift = 0;
             case EPDO::FETCH_NUM:
             case EPDO::FETCH_FUNC:
+            case EPDO::FETCH_NAMED:
             case EPDO::FETCH_KEY_PAIR:
                 $row = mysql_fetch_row($this->result);
                 break;
             case EPDO::FETCH_INTO: // unconditional
                 $shift = 0;
             case EPDO::FETCH_ASSOC:
-            case EPDO::FETCH_NAMED:
-                $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)?
+                $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)
                 break;
             case EPDO::FETCH_BOTH:
-                $row = mysql_fetch_array($this->result); // TODO: unsafe *when* shifted (homonyms)?
+                $row = mysql_fetch_array($this->result); // TODO: unsafe *when* shifted (homonyms)
                 break;
             case EPDO::FETCH_OBJ:
                 if ($shift/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
-                    $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)?
+                    $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)
                 } else {
                     return mysql_fetch_object($this->result);
                 }
@@ -625,15 +625,15 @@ class EPDOStatement implements Iterator {
                 return $row;
             case EPDO::FETCH_NAMED:
                 $res = array();
-                for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
+                for ($c = $shift; $c < mysql_num_fields($this->result); $c++) {
                     $name = mysql_field_name($this->result, $c);
                     if (array_key_exists($name, $res)) {
                         if (!is_array($row[$name])) {
                             $res[$name] = (array) $res[$name];
                         }
-                        $res[$name][] = $row[$c];
+                        $res[$name][] = $row[$c - $shift];
                     } else {
-                        $res[$name] = $row[$c];
+                        $res[$name] = $row[$c - $shift];
                     }
                 }
                 return $res;
