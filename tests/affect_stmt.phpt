@@ -13,6 +13,8 @@ $stmt->execute(array('%'));
 
 var_dump($stmt->rowCount());
 var_dump($stmt->fetch(EPDO::FETCH_OBJ));
+
+$dbh->rollback();
 ?>
 --EXPECT--
 int(3)
