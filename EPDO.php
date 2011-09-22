@@ -531,6 +531,7 @@ class EPDOStatement implements Iterator {
                 $value = mb_convert_case($value, constant('MB_' . $case));
             }
         }
+        return $value;
     }
 
     private function _fetch(Array $args, &$key = NULL) {
@@ -549,6 +550,7 @@ class EPDOStatement implements Iterator {
         }
         $nbArgs = count($args);
         $shift = 2 == func_num_args() ? 1 : 0;
+        $change_case = EPDO::CASE_NATURAL != $this->dbh->getAttribute(EPDO::ATTR_CASE);
         switch ($mode & ~EPDO::FETCH_FLAGS) {
             case EPDO::FETCH_BOUND: // unconditional
             case EPDO::FETCH_COLUMN: // unconditional
@@ -562,14 +564,22 @@ class EPDOStatement implements Iterator {
             case EPDO::FETCH_INTO: // unconditional
                 $shift = 0;
             case EPDO::FETCH_ASSOC:
-                $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)
+                if ($shift) {
+                    $row = mysql_fetch_row($this->result);
+                } else {
+                    $row = mysql_fetch_assoc($this->result);
+                }
                 break;
             case EPDO::FETCH_BOTH:
-                $row = mysql_fetch_array($this->result); // TODO: unsafe *when* shifted (homonyms)
+                if ($shift) {
+                    $row = mysql_fetch_row($this->result);
+                } else {
+                    $row = mysql_fetch_array($this->result);
+                }
                 break;
             case EPDO::FETCH_OBJ:
-                if ($shift/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
-                    $row = mysql_fetch_assoc($this->result); // TODO: unsafe *when* shifted (homonyms)
+                if ($shift || $change_case) {
+                    $row = mysql_fetch_row($this->result);
                 } else {
                     return mysql_fetch_object($this->result);
                 }
@@ -584,7 +594,7 @@ class EPDOStatement implements Iterator {
                     $class_name = '';
                     $ctor_args = NULL;
                 }
-                if ($totalshift || $late/* || EPDO::CASE_NATURAL != $this->getAttribute(EPDO::ATTR_CASE)*/) {
+                if ($totalshift || $late || $change_case) {
                     $row = mysql_fetch_row($this->result); // with assoc, columns with the same name will be lost
                 } else {
                     if ($class_name && class_exists($class_name)) { // call autoload
@@ -603,8 +613,10 @@ class EPDOStatement implements Iterator {
         if (FALSE === $row) {
             return FALSE;
         }
-        // TODO: apply ATTR_CASE? (only for mysql_fetch_assoc and mysql_fetch_array)
         if (!$shift && in_array($mode & ~EPDO::FETCH_FLAGS, array(EPDO::FETCH_NUM, EPDO::FETCH_ASSOC, EPDO::FETCH_BOTH), TRUE)) {
+            if ($change_case) {
+                $this->_applyCase($row); // TODO: except EPDO::FETCH_NUM
+            }
             return $row;
         }
         if ($shift && in_array($mode & ~EPDO::FETCH_FLAGS, array(EPDO::FETCH_BOTH, EPDO::FETCH_NUM, EPDO::FETCH_ASSOC, EPDO::FETCH_NAMED, EPDO::FETCH_FUNC, EPDO::FETCH_OBJ), TRUE)) {
@@ -616,19 +628,28 @@ class EPDOStatement implements Iterator {
                 // TODO: assume $no < mysql_num_fields($this->result)
                 return $row[$no];
             case EPDO::FETCH_BOTH:
-                if ($shift) {
-                    unset($row[mysql_field_name($this->result, 0)]);
+                $res = array();
+                foreach ($row as $i => $v) {
+                    $name = mysql_field_name($this->result, $i + $shift);
+                    $res[$this->_applyCase($name)] = $v;
+                    $res[$i] = $v;
                 }
-                return $row;
+                return $res;
             case EPDO::FETCH_NUM:
-            case EPDO::FETCH_ASSOC:
                 return $row;
+            case EPDO::FETCH_ASSOC:
+                $res = array();
+                foreach ($row as $i => $v) {
+                    $name = mysql_field_name($this->result, $i + $shift);
+                    $res[$this->_applyCase($name)] = $v;
+                }
+                return $res;
             case EPDO::FETCH_NAMED:
                 $res = array();
                 for ($c = $shift; $c < mysql_num_fields($this->result); $c++) {
                     $name = mysql_field_name($this->result, $c);
                     if (array_key_exists($name, $res)) {
-                        if (!is_array($row[$name])) {
+                        if (!is_array($res[$name])) {
                             $res[$name] = (array) $res[$name];
                         }
                         $res[$name][] = $row[$c - $shift];
@@ -672,7 +693,7 @@ class EPDOStatement implements Iterator {
                     }
                     foreach ($row as $i => $v) {
                         $k = mysql_field_name($this->result, $i + $totalshift);
-                        // TODO: apply ATTR_CASE on $k
+                        $this->_applyCase($k);
                         if ($rc->hasProperty($k) && ($p = $rc->getProperty($k)) && ($p->isPrivate() || $p->isProtected())) {
                             $p->setAccessible(TRUE);
                             $p->setValue($obj, $v);
@@ -692,7 +713,13 @@ class EPDOStatement implements Iterator {
                 }
                 // no break here !!!
             case EPDO::FETCH_OBJ:
-                return (object) $row;
+                $res = array();
+                foreach ($row as $i => $v) {
+                    // TODO: $shift or $totalshift? (CLASSTYPE failure)
+                    $name = mysql_field_name($this->result, $i + $shift);
+                    $res[$this->_applyCase($name)] = $v;
+                }
+                return (object) $res;
             case EPDO::FETCH_INTO: /* &object */
                 // PDO::FETCH_INTO doesn't handle private properties (throw error or need to define __set)
                 //$ro = new ReflectionObject($args[0]);
@@ -707,6 +734,7 @@ class EPDOStatement implements Iterator {
                 }
                 return $args[0];
             case EPDO::FETCH_BOUND:
+                // TODO: does case apply here?
                 for ($c = 0; $c < mysql_num_fields($this->result); $c++) {
                     if (array_key_exists($c + 1, $this->out)) {
                         $this->out[$c + 1] = $row[$c];
